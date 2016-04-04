@@ -13,94 +13,144 @@ var fs = require('fs'),
     types = require("./types.js"),
 	  filename;
 
-var image = () => {
+var file = () => {
   this.data = undefined;
-  this.colors = []; // Should have indexes identical to the colors' indexes in the file's color table
-  
-  this.parse = {
-      header: () => {
-      this.signature = this.data.getNext(helpers.constants.SIZES.SIGNATURE);
-      helpers.insist(this.signature.toString() === helpers.constants.GIF_SIGNATURE, "Not a valid GIF: GIF signature not present");
+  this.header = {
+    signature: undefined,
+    version: undefined
+  };
+  this.logicalScreen = {
+    width: undefined,
+    height: undefined
+  };
+  this.globalColorTable = {
+    data: undefined,
+    flag: undefined,
+    sorted: undefined,
+    size: undefined,
+    colors: []    // Indexes should be maintained
+  };
+  this.extensions = [ ];
+  this.images = [   // Potentially many, each with an Image Descriptor, (optional) Local Color Table, and Image Data
+    /*{
+      descriptor: { // Image descriptor block
 
-      this.version = this.data.getNext(helpers.constants.SIZES.VERSION);
-      helpers.insist(typeof helpers.constants.VERSIONS[this.version.toString()] !== "undefined", "Not a valid GIF: Version must be 87a or 89a, got " + this.version.toString());
+      },
+      lct: {        // Local color table
+        flag: undefined,
+        interlaced: undefined,
+        sorted: undefined,
+        colors: []  // Indexes should be maintained, type Color
+      }
+    }*/
+  ];
+
+  this.parse = {
+    header: () => {
+      this.header.signature = this.data.getNext(helpers.constants.SIZES.SIGNATURE);
+      helpers.insist(this.header.signature.toString() === helpers.constants.GIF_SIGNATURE, "Not a valid GIF: GIF signature not present");
+
+      this.header.version = this.data.getNext(helpers.constants.SIZES.VERSION);
+      helpers.insist(typeof helpers.constants.VERSIONS[this.header.version.toString()] !== "undefined", "Not a valid GIF: Version must be 87a or 89a, got " + this.header.version.toString());
 
       this.explain.header();
     },
     logicalScreenDescriptor: () => {
-      this.logicalScreenWidth = this.data.getNext(helpers.constants.SIZES.UNSIGNED).buffer.readInt16LE();
-      this.logicalScreenHeight = this.data.getNext(helpers.constants.SIZES.UNSIGNED).buffer.readInt16LE();
+      this.logicalScreen.width = this.data.getNext(helpers.constants.SIZES.UNSIGNED).buffer.readInt16LE();
+      this.logicalScreen.height = this.data.getNext(helpers.constants.SIZES.UNSIGNED).buffer.readInt16LE();
 
       // Start packed GCT fields
 
       var packedFields = this.data.getNext(helpers.constants.SIZES.BYTE);
       var packedFieldsInt = packedFields.toInt();
-      this.globalColorTableFlag = helpers.checkBitFlag(packedFieldsInt, 1);
-      this.colorResolution = helpers.unpackInteger(packedFieldsInt, 2, 4);
-      this.globalColorTableSortFlag = helpers.checkBitFlag(packedFieldsInt, 5);
+      this.globalColorTable.flag = helpers.checkBitFlag(packedFieldsInt, 1);
+      this.logicalScreen.colorResolution = helpers.unpackInteger(packedFieldsInt, 2, 4);
+      this.globalColorTable.sorted = helpers.checkBitFlag(packedFieldsInt, 5);
 
       // Per spec, the GCT size is stored in the 3 least significant bits of the packed fields: "To determine [the] actual size of the color table, raise 2 to [the value of the field + 1]"
-      this.globalColorTableSizeRaw = helpers.unpackInteger(packedFieldsInt, 5, 8);
-      this.globalColorTableSize = Math.pow(2, (helpers.unpackInteger(packedFieldsInt, 5, 8) + 1));
+      this.globalColorTable.sizeRaw = helpers.unpackInteger(packedFieldsInt, 5, 8);
+      this.globalColorTable.size = Math.pow(2, (helpers.unpackInteger(packedFieldsInt, 5, 8) + 1));
 
         // End packed GCT fields
 
-      this.backgroundColorIndex = this.data.getNext(helpers.constants.SIZES.BYTE).toInt();
-      this.pixelAspectRatio = this.data.getNext(helpers.constants.SIZES.BYTE).toInt();
+      this.logicalScreen.backgroundColorIndex = this.data.getNext(helpers.constants.SIZES.BYTE).toInt();
+      this.logicalScreen.pixelAspectRatio = this.data.getNext(helpers.constants.SIZES.BYTE).toInt();
+
+      this.globalColorTable.colors = this.parse.colorTable(this.globalColorTable.size);
 
       this.explain.logicalScreenDescriptor()
     },
-    globalColorTable: () => {
-      this.globalColorTable = this.data.getNext(3 * this.globalColorTableSize);
-      this.globalColorTable.forEvery(helpers.constants.SIZES.COLOR, (colorBuffer) => {
-          this.colors.push(new types.Color(colorBuffer));
+    colorTable: (size) => {
+      var colorData = this.data.getNext(helpers.constants.SIZES.COLOR * size);
+      var colors = [];
+      colorData.forEvery(helpers.constants.SIZES.COLOR, (colorBuffer) => {
+          colors.push(new types.Color(colorBuffer));
       });
-      this.explain.globalColorTable();
+      return colors
     },
-    localColorTable: () => {
-      console.log("LCT Incomplete; bugs a-comin");
-      this.localColorTable = this.data.getNext(3 * this.globalColorTableSize);
-      this.localColorTable.forEvery(helpers.constants.SIZES.COLOR, (colorBuffer) => {
-        this.colors.push(new types.Color(colorBuffer));
-      });
-      this.explain.localColorTable();
-    },
-    imageDescriptor: () => {
-      this.imageSeparator = this.data.getNext(helpers.constants.SIZES.BYTE);
-      this.imageLeftPosition = this.data.getNext(helpers.constants.SIZES.UNSIGNED);
-      this.imageTopPosition = this.data.getNext(helpers.constants.SIZES.UNSIGNED);
-      this.imageWidth = this.data.getNext(helpers.constants.SIZES.UNSIGNED);
-      this.imageHeight = this.data.getNext(helpers.constants.SIZES.UNSIGNED);
+    image: () => {
+      var descriptor = {
+        separator: this.data.getNext(helpers.constants.SIZES.BYTE),
+        left: this.data.getNext(helpers.constants.SIZES.UNSIGNED),
+        top: this.data.getNext(helpers.constants.SIZES.UNSIGNED),
+        width: this.data.getNext(helpers.constants.SIZES.UNSIGNED),
+        height: this.data.getNext(helpers.constants.SIZES.UNSIGNED)
+      };
 
-       // Start packed image descriptor fields
+      // Start packed image descriptor fields
       var packedFields = this.data.getNext(helpers.constants.SIZES.BYTE);
       var packedFieldsInt = packedFields.toInt();
-      this.localColorTableFlag = helpers.checkBitFlag(packedFieldsInt, 1);
-      this.localColorTableInterlaceFlag = helpers.unpackInteger(packedFieldsInt, 2, 4);
-      this.localColorTableSortFlag = helpers.checkBitFlag(packedFieldsInt, 5);
-      this.localColorTableSize = helpers.unpackInteger(packedFieldsInt, 5, 8);
+
+      var lct = {        // Local color table
+        flag: helpers.checkBitFlag(packedFieldsInt, 1),
+        interlaced: helpers.unpackInteger(packedFieldsInt, 2, 4),
+        sorted: helpers.checkBitFlag(packedFieldsInt, 5),
+        size: helpers.unpackInteger(packedFieldsInt, 5, 8),
+      };
       // End packed image descriptor fields
 
-      this.explain.imageDescriptor()
+      if(lct.flag) {
+        lct.colors = this.parse.colorTable(lct.size)
+      }
+
+      var index = this.images.push({
+        descriptor: descriptor,
+        lct: lct
+      }) - 1;
+
+      this.explain.imageDescriptor(index)
     },
     graphicsControlExtension: () => {
-      this.extensionBlock = this.data.getNext(helpers.constants.SIZES.BYTE);
-      this.graphicControlLabel = this.data.getNext(helpers.constants.SIZES.BYTE);
-      this.blockSize = this.data.getNext(helpers.constants.SIZES.BYTE);
+      var extension = {
+        introducer: undefined,
+        label: undefined,
+        blockSize: undefined,
+        disposalMethod: undefined,
+        userInputFlag: undefined,
+        transportColorFlag: undefined,
+        delayTime: undefined,
+        transparentColorIndex: undefined,
+        blockTerminator: undefined
+      };
+
+      extension.introducer = this.data.getNext(helpers.constants.SIZES.BYTE);
+      extension.label = this.data.getNext(helpers.constants.SIZES.BYTE);
+      extension.blockSize = this.data.getNext(helpers.constants.SIZES.BYTE);
 
       // Start extension packed fields
       var packedFields = this.data.getNext(helpers.constants.SIZES.BYTE);
       var packedFieldsInt = packedFields.toInt();
-      this.disposalMethod = helpers.unpackInteger(packedFieldsInt, 3 ,6);
-      this.userInputFlag = helpers.checkBitFlag(packedFieldsInt, 7);
-      this.transportColorFlag = helpers.checkBitFlag(packedFieldsInt, 8);
+      extension.disposalMethod = helpers.unpackInteger(packedFieldsInt, 3 ,6);
+      extension.userInputFlag = helpers.checkBitFlag(packedFieldsInt, 7);
+      extension.transportColorFlag = helpers.checkBitFlag(packedFieldsInt, 8);
         // End extension packed fields
 
-      this.delayTime = this.data.getNext(helpers.constants.SIZES.UNSIGNED);
-      this.transparentColorIndex = this.data.getNext(helpers.constants.SIZES.BYTE);
-      this.blockTerminator = this.data.getNext(helpers.constants.SIZES.BYTE);
+      extension.delayTime = this.data.getNext(helpers.constants.SIZES.UNSIGNED);
+      extension.transparentColorIndex = this.data.getNext(helpers.constants.SIZES.BYTE);
+      extension.blockTerminator = this.data.getNext(helpers.constants.SIZES.BYTE);
 
-      this.explain.graphicsControlExtension();
+      var index = this.extensions.push(extension) - 1;
+      this.explain.graphicsControlExtension(index);
     },
     comment: () => {
       this.commentExtensionIntroduction = this.data.getNext(helpers.constants.SIZES.BYTE);
@@ -116,52 +166,60 @@ var image = () => {
   
   this.explain = {
     header: () => {
-      console.log("Signature:\t\t\t",this.signature.toString(),"\t\t(Fixed value)");
-	    console.log("Version:\t\t\t",helpers.constants.VERSIONS[this.version.toString()],"\t(87a or 89a)");
+      console.log("Signature:\t\t\t", this.header.signature.toString(),"\t\t(Fixed value)");
+	    console.log("Version:\t\t\t", helpers.constants.VERSIONS[this.header.version.toString()],"\t(87a or 89a)");
 	  },
     logicalScreenDescriptor: () => {
-      console.log("Logical Screen Width:\t\t", this.logicalScreenWidth,"\t\t(pixels)");
-      console.log("Logical Screen Height:\t\t", this.logicalScreenHeight,"\t\t(pixels)");
-      console.log("Global Color Table Flag:\t",this.globalColorTableFlag.toString(), "\t\t" + (this.globalColorTableFlag ? "(Global Color Table will immediately follow)" : "(No Global Color Table follows)" ));
-      console.log("Color Resolution:\t\t", this.colorResolution, "\t\t(" + (this.colorResolution + 1) + " bits available per primary color)");
-      console.log("GCT Sort Flag:\t\t\t", this.globalColorTableSortFlag, "\t\t" + (this.globalColorTableSortFlag ? "(Global Color Table ordered by decreasing importance, most important color first)" : "(Global Color Table not ordered)"));
-      console.log("GCT Size:\t\t\t", this.globalColorTableSizeRaw, "\t\t(" + this.globalColorTableSize + " colors, 2^(GCTSIZE+1))");
-      console.log("Background Color Index:\t\t", this.backgroundColorIndex,"\t\t(Index of background color in Global Color Table)");
-      console.log("Pixel Aspect Ratio:\t\t", this.pixelAspectRatio, "\t\t" + (this.pixelAspectRatio == 0 ? "(No aspect ratio information is given)" : "(Aspect Ratio = (Pixel Aspect Ratio + 15) / 64)"));
+      console.log(helpers.constants.BREAK, "Logical Screen Descriptor", helpers.constants.BREAK);
+
+      console.log("Logical Screen Width:\t\t", this.logicalScreen.width,"\t\t(pixels)");
+      console.log("Logical Screen Height:\t\t", this.logicalScreen.height,"\t\t(pixels)");
+      console.log("Global Color Table Flag:\t",this.globalColorTable.flag.toString(), "\t\t" + (this.globalColorTable.flag ? "(Global Color Table will immediately follow)" : "(No Global Color Table follows)" ));
+      console.log("Color Resolution:\t\t", this.logicalScreen.colorResolution, "\t\t(" + (this.logicalScreen.colorResolution + 1) + " bits available per primary color)");
+      console.log("GCT Sort Flag:\t\t\t", this.globalColorTable.sorted, "\t\t" + (this.globalColorTable.sorted ? "(Global Color Table ordered by decreasing importance, most important color first)" : "(Global Color Table not ordered)"));
+      console.log("GCT Size:\t\t\t", this.globalColorTable.sizeRaw, "\t\t(" + this.globalColorTable.size + " colors, 2^(GCTSIZE+1))");
+      console.log("Background Color Index:\t\t", this.logicalScreen.backgroundColorIndex,"\t\t(Index of background color in Global Color Table)");
+      console.log("Pixel Aspect Ratio:\t\t", this.logicalScreen.pixelAspectRatio, "\t\t" + (this.logicalScreen.pixelAspectRatio === 0 ? "(No aspect ratio information is given)" : "(Aspect Ratio = (Pixel Aspect Ratio + 15) / 64)"));
+
+      if(this.globalColorTable.flag) {
+        console.log(helpers.constants.BREAK,"Global Color Table",helpers.constants.BREAK);
+        console.log(this.globalColorTable.colors.length + " Colors:")
+        _.each(this.globalColorTable.colors, (color, index) => {
+          console.log("[" + index + "] " + color.toString())
+        })
+      }
     },
-    globalColorTable: () => {
-      //console.log(this.colors.length + " Colors");
-      console.log(this.colors.length + " Colors:")
-      _.each(this.colors, (color, index) => {
-        console.log("[" + index + "] " + color.toString())
-      })
-    },
-    graphicsControlExtension: () => {
+    graphicsControlExtension: (index) => {
+      var extension = this.extensions[index];
+
       console.log(helpers.constants.BREAK, "Extension Block", helpers.constants.BREAK);
-      console.log("Extension Introducer:\t\t", this.extensionBlock.toInt().toString(16),"\t\t(Fixed 0x21)");
-      console.log("Graphic Control Label:\t\t", this.graphicControlLabel.toInt().toString(16),"\t\t(Fixed 0xF9)");
-      console.log("Block Size:\t\t\t", this.blockSize.toInt(), "[dec]");
-      console.log("Disposal Method:\t\t", this.disposalMethod);
-      console.log("User Input Flag:\t\t", this.userInputFlag);
-      console.log("Transport Color Flag:\t\t", this.transportColorFlag);
-      console.log("Delay Time:\t\t\t", this.delayTime.toInt());
-      console.log("Transparent Color Index:\t", this.transparentColorIndex.toInt().toString(16));
-      console.log("Block Terminator:\t\t", this.blockTerminator.toInt().toString(16));
+      console.log("Extension Introducer:\t\t", extension.introducer.toInt().toString(16),"\t\t(Fixed 0x21)");
+      console.log("Graphic Control Label:\t\t", extension.label.toInt().toString(16),"\t\t(Fixed 0xF9)");
+      console.log("Block Size:\t\t\t", extension.blockSize.toInt(), "[dec]");
+      console.log("Disposal Method:\t\t", extension.disposalMethod);
+      console.log("User Input Flag:\t\t", extension.userInputFlag);
+      console.log("Transport Color Flag:\t\t", extension.transportColorFlag);
+      console.log("Delay Time:\t\t\t", extension.delayTime.toInt());
+      console.log("Transparent Color Index:\t", extension.transparentColorIndex.toInt().toString(16));
+      console.log("Block Terminator:\t\t", extension.blockTerminator.toInt().toString(16));
     },
-    imageDescriptor: () => {
-      console.log(helpers.constants.BREAK,"Image Descriptor",helpers.constants.BREAK);
-      console.log("Image Separator:\t\t", this.imageSeparator.toInt().toString(16), "(Fixed 0x2C)");
-      console.log("Image Left Position:\t\t", this.imageLeftPosition.toInt());
-      console.log("Image Top Position:\t\t", this.imageTopPosition.toInt());
-      console.log("Image Width:\t\t\t", this.imageWidth.buffer.readUInt16LE());
-      console.log("Image Height:\t\t\t", this.imageHeight.buffer.readUInt16LE());
-    },
-    localColorTable: () => {
-      console.log(helpers.constants.BREAK,"Local Color Table",helpers.constants.BREAK);
-      console.log("LCT Flag:\t\t\t", this.localColorTableFlag);
-      console.log("LCT Interlace Flag:\t\t", this.localColorTableInterlaceFlag);
-      console.log("LCT Sort Flag:\t\t\t", this.localColorTableSortFlag);
-      console.log("LCT Size:\t\t\t", this.localColorTableSize);
+    imageDescriptor: (index) => {
+      var image = this.images[index];
+      
+      console.log(helpers.constants.BREAK,"Image Descriptor " + index,helpers.constants.BREAK);
+      console.log("Image Separator:\t\t", image.descriptor.separator.toInt().toString(16), "(Fixed 0x2C)");
+      console.log("Image Left Position:\t\t", image.descriptor.left.toInt());
+      console.log("Image Top Position:\t\t", image.descriptor.top.toInt());
+      console.log("Image Width:\t\t\t", image.descriptor.width.buffer.readUInt16LE());
+      console.log("Image Height:\t\t\t", image.descriptor.height.buffer.readUInt16LE());
+
+      if(image.lct.flag) {
+        console.log(helpers.constants.BREAK,"Local Color Table",helpers.constants.BREAK);
+        console.log("LCT Flag:\t\t\t", image.lct.flag);
+        console.log("LCT Interlace Flag:\t\t", image.lct.interlaced);
+        console.log("LCT Sort Flag:\t\t\t", image.lct.sorted);
+        console.log("LCT Size:\t\t\t", image.lct.size);
+      }
     },
     comment: () => {
     },
@@ -177,10 +235,6 @@ var image = () => {
       if(this.data.position === 0) {
         this.parse.header();
         this.parse.logicalScreenDescriptor();
-
-        if(this.globalColorTableFlag) {
-          this.parse.globalColorTable();
-        }
       }
 
       var nextByte = this.data.peekNext(helpers.constants.SIZES.BYTE).toInt().toString(16);
@@ -190,16 +244,14 @@ var image = () => {
           this.parse.graphicsControlExtension();
           break;
         case helpers.constants.BLOCKS.IMAGE_DESCRIPTOR:
-          this.parse.imageDescriptor();
-          if(this.localColorTableFlag) {
-            this.parse.localColorTable();
-          }
+          this.parse.image();
           break;
         case helpers.constants.BLOCKS.COMMENT_EXTENSION:
           this.parse.comment();
           break;
         default:
-          console.log("Next byte:", nextByte);
+          this.next = this.data.getNext(24);
+          console.log("Next bytes:", this.next.toString('hex'));
           return;
       }
     }
@@ -216,5 +268,5 @@ var image = () => {
 var readStream = fs.readFile(filename, (err, data) => {
   console.log(helpers.constants.BREAK,"Reading", filename, helpers.constants.BREAK);
   if(err) { console.log(err); }
-  image.read(data);
+  file.read(data);
 });
