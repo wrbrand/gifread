@@ -1,6 +1,6 @@
 {
   "name": "gifread",
-  "version": "0.1",
+  "version": "1.0.0",
   "description": "A simple parser for GIF files, to explain the format",
   "author": "Will Brand <will.brand@gmail.com>",
   "contributors": [{
