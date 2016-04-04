@@ -3,18 +3,19 @@
   "version": "1.0.0",
   "description": "A simple parser for GIF files, to explain the format",
   "author": "Will Brand <will.brand@gmail.com>",
-  "contributors": [{
-    "name": "Will Brand",
-    "email": "will.brand@gmail.com"
-  }],
+  "contributors": [
+    {
+      "name": "Will Brand",
+      "email": "will.brand@gmail.com"
+    }
+  ],
   "main": "gifread.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/wrbrand/gifread"
   },
   "dependencies": {
-    "fs": "*",
+    "fs": "0.0.2",
     "lodash": "*"
   }
 }
-

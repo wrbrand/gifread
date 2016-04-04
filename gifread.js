@@ -49,6 +49,41 @@ var file = () => {
     }*/
   ];
 
+  this.read = (data) => {
+    this.data = new types.LinearBuffer(data);
+
+    while(this.data.position < this.data.getLength()) {
+      if(this.data.position === 0) {
+        this.parse.header();
+        this.parse.logicalScreenDescriptor();
+      }
+
+      var nextByte = this.data.peekNext(helpers.constants.SIZES.BYTE).toInt().toString(16);
+
+      switch(nextByte) {
+        case helpers.constants.BLOCKS.GRAPHICS_CONTROL_EXTENSION:
+          this.parse.graphicsControlExtension();
+          break;
+        case helpers.constants.BLOCKS.IMAGE_DESCRIPTOR:
+          this.parse.image();
+          break;
+        case helpers.constants.BLOCKS.COMMENT_EXTENSION:
+          this.parse.comment();
+          break;
+        case helpers.constants.BLOCKS.TRAILER:
+          this.parse.trailer();
+          break;
+        default:
+          this.next = this.data.getNext(24);
+          console.log("Next bytes:", this.next.toString('hex'));
+          return;
+      }
+    }
+    //For debug purposes
+    this.next = this.data.getNext(24);
+    console.log(this.next.toString('hex'));
+  };
+
   this.parse = {
     header: () => {
       this.header.signature = this.data.getNext(helpers.constants.SIZES.SIGNATURE);
@@ -208,7 +243,7 @@ var file = () => {
       console.log("Color Resolution:\t\t", this.logicalScreen.colorResolution, "\t\t(" + (this.logicalScreen.colorResolution + 1) + " bits available per primary color)");
       console.log("GCT Sort Flag:\t\t\t", this.globalColorTable.sorted, "\t\t" + (this.globalColorTable.sorted ? "(Global Color Table ordered by decreasing importance, most important color first)" : "(Global Color Table not ordered)"));
       console.log("GCT Size:\t\t\t", this.globalColorTable.sizeRaw, "\t\t(" + this.globalColorTable.size + " colors, 2^(GCTSIZE+1))");
-      console.log("Background Color Index:\t\t", this.logicalScreen.backgroundColorIndex,"\t\t(Index of background color in Global Color Table)");
+      console.log("Background Color Index:\t\t", this.logicalScreen.backgroundColorIndex,this.globalColorTable.colors[parseInt(this.logicalScreen.backgroundColorIndex, 16)].toString("shortest"),"\t(Index of background color in Global Color Table)");
       console.log("Pixel Aspect Ratio:\t\t", this.logicalScreen.pixelAspectRatio, "\t\t" + (this.logicalScreen.pixelAspectRatio === 0 ? "(No aspect ratio information is given)" : "(Aspect Ratio = (Pixel Aspect Ratio + 15) / 64)"));
 
       if(this.globalColorTable.flag) {
@@ -230,14 +265,14 @@ var file = () => {
       console.log("User Input Flag:\t\t", extension.userInputFlag);
       console.log("Transport Color Flag:\t\t", extension.transportColorFlag);
       console.log("Delay Time:\t\t\t", extension.delayTime.toInt());
-      console.log("Transparent Color Index:\t", extension.transparentColorIndex.toInt().toString(16));
+      console.log("Transparent Color Index:\t", extension.transparentColorIndex.toInt().toString(16), this.globalColorTable.colors[extension.transparentColorIndex.toInt()].toString("shortest"));
       console.log("Block Terminator:\t\t", extension.blockTerminator.toInt().toString(16));
     },
     image: (index) => {
       var image = this.images[index];
 
       console.log(helpers.constants.BREAK,"Image Descriptor " + index,helpers.constants.BREAK);
-      console.log("Image Separator:\t\t", image.descriptor.separator.toInt().toString(16), "(Fixed 0x2C)");
+      console.log("Image Separator:\t\t", image.descriptor.separator.toInt().toString(16), "\t(Fixed 0x2C)");
       console.log("Image Left Position:\t\t", image.descriptor.left.toInt());
       console.log("Image Top Position:\t\t", image.descriptor.top.toInt());
       console.log("Image Width:\t\t\t", image.descriptor.width.buffer.readUInt16LE());
@@ -268,41 +303,7 @@ var file = () => {
 
     }
   };
-  
-  this.read = (data) => {
-    this.data = new types.LinearBuffer(data);
-	
-	  while(this.data.position < this.data.getLength()) {
-      if(this.data.position === 0) {
-        this.parse.header();
-        this.parse.logicalScreenDescriptor();
-      }
 
-      var nextByte = this.data.peekNext(helpers.constants.SIZES.BYTE).toInt().toString(16);
-
-      switch(nextByte) {
-        case helpers.constants.BLOCKS.GRAPHICS_CONTROL_EXTENSION:
-          this.parse.graphicsControlExtension();
-          break;
-        case helpers.constants.BLOCKS.IMAGE_DESCRIPTOR:
-          this.parse.image();
-          break;
-        case helpers.constants.BLOCKS.COMMENT_EXTENSION:
-          this.parse.comment();
-          break;
-        case helpers.constants.BLOCKS.TRAILER:
-          this.parse.trailer();
-          break;
-        default:
-          this.next = this.data.getNext(24);
-          console.log("Next bytes:", this.next.toString('hex'));
-          return;
-      }
-    }
-    //For debug purposes
-    this.next = this.data.getNext(24);
-    console.log(this.next.toString('hex'));
-  };
   return this;
 }();
 

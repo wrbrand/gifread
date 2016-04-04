@@ -37,8 +37,12 @@ module.exports = {
     this.red = this.buffer.getNext(helpers.constants.SIZES.BYTE).toInt();
     this.green =  this.buffer.getNext(helpers.constants.SIZES.BYTE).toInt();
     this.blue = this.buffer.getNext(helpers.constants.SIZES.BYTE).toInt();
-    this.toString = () => {
-      return "\tR" + this.red + "\tG" + this.green + "\tB" + this.blue
+    this.toString = (verbosity) => {
+      switch(verbosity) {
+        case "shortest":
+          return "("+[this.red,this.green,this.blue].join(',')+")";
+      }
+      return "\tR" + this.red + "\tG" + this.green + "\tB" + this.blue;
     }
   }
 }
