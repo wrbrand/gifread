@@ -41,6 +41,10 @@ var file = () => {
         interlaced: undefined,
         sorted: undefined,
         colors: []  // Indexes should be maintained, type Color
+      },
+      data: {
+        LZWMinimumCodeSize: undefined
+        blocks: []  // Image data sub-blocks
       }
     }*/
   ];
@@ -105,7 +109,7 @@ var file = () => {
         flag: helpers.checkBitFlag(packedFieldsInt, 1),
         interlaced: helpers.unpackInteger(packedFieldsInt, 2, 4),
         sorted: helpers.checkBitFlag(packedFieldsInt, 5),
-        size: helpers.unpackInteger(packedFieldsInt, 5, 8),
+        size: helpers.unpackInteger(packedFieldsInt, 5, 8)
       };
       // End packed image descriptor fields
 
@@ -113,12 +117,38 @@ var file = () => {
         lct.colors = this.parse.colorTable(lct.size)
       }
 
+      var imageData = this.parse.imageData();
+
       var index = this.images.push({
         descriptor: descriptor,
-        lct: lct
+        lct: lct,
+        data: imageData
       }) - 1;
 
-      this.explain.imageDescriptor(index)
+      this.explain.image(index)
+    },
+    imageData: () => {
+      var imageData = {
+        LZWMinimumCodeSize: this.data.getNext(helpers.constants.SIZES.BYTE),
+        blocks: [],
+        terminator: undefined // Literally a reference to the terminating byte
+      };
+
+      while(this.data.peekNext(helpers.constants.SIZES.BYTE).toInt() !== 0) {
+        var block = {
+          size: undefined,
+          data: undefined
+        };
+
+        block.size = this.data.getNext(helpers.constants.SIZES.BYTE).toInt();
+        block.data = this.data.getNext(block.size);
+
+        imageData.blocks.push(block);
+      }
+
+      imageData.terminator = this.data.getNext(helpers.constants.SIZES.BYTE);
+
+      return imageData;
     },
     graphicsControlExtension: () => {
       var extension = {
@@ -158,9 +188,9 @@ var file = () => {
       this.blockTerminator = this.data.getNext(helpers.constants.SIZES.BYTE);
       this.explain.comment();
     },
-    imageData: () => {
-      this.LZWMinimumCodeSize = this.data.getNext(helpers.constants.SIZES.BYTE);
-      this.explain.imageData();
+    trailer: () => {
+      this.trailer = this.data.getNext(helpers.constants.SIZES.BYTE);
+      this.explain.trailer();
     }
   };
   
@@ -203,9 +233,9 @@ var file = () => {
       console.log("Transparent Color Index:\t", extension.transparentColorIndex.toInt().toString(16));
       console.log("Block Terminator:\t\t", extension.blockTerminator.toInt().toString(16));
     },
-    imageDescriptor: (index) => {
+    image: (index) => {
       var image = this.images[index];
-      
+
       console.log(helpers.constants.BREAK,"Image Descriptor " + index,helpers.constants.BREAK);
       console.log("Image Separator:\t\t", image.descriptor.separator.toInt().toString(16), "(Fixed 0x2C)");
       console.log("Image Left Position:\t\t", image.descriptor.left.toInt());
@@ -220,11 +250,22 @@ var file = () => {
         console.log("LCT Sort Flag:\t\t\t", image.lct.sorted);
         console.log("LCT Size:\t\t\t", image.lct.size);
       }
+
+      this.explain.imageData(image);
+    },
+    imageData: (image) => {
+      console.log("LZW Minimum Code Size:\t\t", image.data.LZWMinimumCodeSize.toInt(),"\t(Initial number of bits used for LZW codes in the image data)");
+      _.each(image.data.blocks, (block, index) => {
+        console.log("Image Data Sub-Block " + index + ": Size " + block.size);
+      })
     },
     comment: () => {
     },
-    imageData: () => {
-      console.log("LZW Minimum Code Size:\t", this.LZWMinimumCodeSize.toInt(),"\t(Initial number of bits used for LZW codes in the image data)");
+    trailer: () => {
+      console.log(helpers.constants.BREAK,"Trailer",helpers.constants.BREAK);
+      console.log("Trailer:\t\t\t", this.trailer.toInt().toString(16),"\t(Fixed 0x3B)");
+      console.log(helpers.constants.BREAK,"End of File Reached",helpers.constants.BREAK);
+
     }
   };
   
@@ -249,15 +290,15 @@ var file = () => {
         case helpers.constants.BLOCKS.COMMENT_EXTENSION:
           this.parse.comment();
           break;
+        case helpers.constants.BLOCKS.TRAILER:
+          this.parse.trailer();
+          break;
         default:
           this.next = this.data.getNext(24);
           console.log("Next bytes:", this.next.toString('hex'));
           return;
       }
     }
-
-    this.parse.imageData();
-
     //For debug purposes
     this.next = this.data.getNext(24);
     console.log(this.next.toString('hex'));
