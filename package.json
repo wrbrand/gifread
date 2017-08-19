@@ -10,11 +10,13 @@
     }
   ],
   "main": "gifread.js",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/wrbrand/gifread"
   },
   "dependencies": {
+    "chalk": "^2.1.0",
     "fs": "0.0.2",
     "lodash": "*"
   }

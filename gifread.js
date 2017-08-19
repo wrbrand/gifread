@@ -9,6 +9,7 @@ if(process.argv.length < 3) {
 
 var fs = require('fs'),
     _  = require('lodash'),
+    chalk = require('chalk'),
     helpers = require("./helpers.js"),
     types = require("./types.js"),
 	  filename;
@@ -250,7 +251,7 @@ var file = () => {
         console.log(helpers.constants.BREAK,"Global Color Table",helpers.constants.BREAK);
         console.log(this.globalColorTable.colors.length + " Colors:")
         _.each(this.globalColorTable.colors, (color, index) => {
-          console.log("[" + index + "] " + color.toString())
+	    console.log(chalk.rgb(color.red, color.green, color.blue).bold("[" + index + "] " + color.toString()));
         })
       }
     },
